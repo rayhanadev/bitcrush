@@ -1,0 +1,21 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+*.xcodeproj
+DerivedData/
+
+# build output (the assembled .app + generated icon)
+build/
+
+# local audio/render cache (mirrors ~/Library/Application Support/plunk)
+.cache/
+
+# secrets / env
+.env
+*.env
+
+# macOS
+.DS_Store

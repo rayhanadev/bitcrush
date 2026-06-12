@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Bitcrush&lt;3</string>
+  <key>CFBundleDisplayName</key>
+  <string>Bitcrush&lt;3</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.rayhanadev.bitcrush</string>
+  <key>CFBundleExecutable</key>
+  <string>Plunk</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.music</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>Bitcrush&lt;3 — pull any song, crush it with love.</string>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Bitcrush&lt;3 reads the title of the song playing in Apple Music so it can re-source and remix it.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <!-- cover-art thumbnails come from arbitrary (sometimes http) hosts -->
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+  </dict>
+</dict>
+</plist>
