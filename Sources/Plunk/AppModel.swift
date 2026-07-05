@@ -15,7 +15,6 @@ enum PrefKey {
   static let flipFormant = "flipFormant"
   static let flipPolish = "flipPolish"
   static let flipGrit = "flipGrit"
-  static let flipAnyVoice = "flipAnyVoice"
 }
 
 /// Top-level state machine: resolve → pull → load into the engine, plus export.
@@ -207,9 +206,6 @@ final class AppModel: ObservableObject {
     return r
   }
 
-  /// Settings escape hatch: let the flip run on any track, skipping detection.
-  var flipAnyVoice: Bool { UserDefaults.standard.bool(forKey: PrefKey.flipAnyVoice) }
-
   /// Human label for what's playing right now (for the read-only deck readout).
   var currentVibe: String {
     vibeLabel(params) + (params.bitcrush ? " + bitcrush" : "")
@@ -218,40 +214,17 @@ final class AppModel: ObservableObject {
 
   // MARK: vocal flip
 
-  /// Why the flip toggle is (un)available right now.
-  enum FlipGate: Equatable {
-    case ready
-    /// Detection didn't read the vocals as male (payload = what it did read).
-    case needsMaleVocals(VocalGender?)
-    case noEngine
-    case noTrack
-    case mixing
-  }
-
-  var flipGate: FlipGate {
-    guard let track else { return .noTrack }
-    guard !engine.mixing else { return .mixing }
-    guard FlipTools.availableEngines().contains(flipRecipe.engine) else { return .noEngine }
-    if flipAnyVoice || track.voice?.gender == .male { return .ready }
-    return .needsMaleVocals(track.voice?.gender)
-  }
-
-  /// The deck-toggle action. `force` (Option-click) overrides the male-vocals
-  /// gate — detection misses duets and high tenors sometimes.
-  func toggleFlip(force: Bool = false) {
+  /// The deck-toggle action: flip on/off for the current track.
+  func toggleFlip() {
     if params.vocalFlip {
       update { $0.vocalFlip = false }
       deactivateFlip()
       return
     }
-    guard let track else { return }
-    switch flipGate {
-    case .ready: break
-    case .needsMaleVocals where force: break
-    case .noEngine:
+    guard let track, !engine.mixing else { return }
+    guard FlipTools.availableEngines().contains(flipRecipe.engine) else {
       errorMessage = "vocal flip: \(FlipTools.installHint(flipRecipe.engine))"
       return
-    default: return
     }
     update { $0.vocalFlip = true }
     startFlipRender(for: track)
@@ -293,24 +266,18 @@ final class AppModel: ObservableObject {
   }
 
   /// After a track becomes current: drop stale flip state, and when the flip
-  /// intent carried over (queue advance / automix with keepEffect), re-gate it
-  /// for the new track — flip only runs where it's allowed to. Call sites set
-  /// `self.track` to `track` first, so `flipGate` judges the right track.
+  /// intent carried over (queue advance / automix with keepEffect), start the
+  /// new track's flip render.
   private func reconcileFlip(for track: TrackInfo) {
     flipTask?.cancel()
     flipTask = nil
     flipState = .off
     guard params.vocalFlip else { return }
-    switch flipGate {
-    case .ready:
-      startFlipRender(for: track)
-    case .needsMaleVocals(nil):
-      // detection is still in flight — ensureVoiceAnalysis re-gates on landing
-      // (the button shows the pending hourglass meanwhile)
-      break
-    default:
+    guard FlipTools.availableEngines().contains(flipRecipe.engine) else {
       params.vocalFlip = false
+      return
     }
+    startFlipRender(for: track)
   }
 
   // MARK: Discord Rich Presence
@@ -373,45 +340,9 @@ final class AppModel: ObservableObject {
     meta = track.meta
     self.track = track
     recent = library.cache.loadRecent()
-    // park/re-gate the flip first, THEN let detection land and re-gate it —
-    // reconcile after ensure would cancel the render ensure just started
     reconcileFlip(for: track)
-    ensureVoiceAnalysis(track)
     clearPrefetch()  // also disarms the engine
     prefetchNext()  // advance Music to the next track + prefetch + arm
-  }
-
-  /// Detect the current track's vocal register in the background (stem-based via
-  /// demucs when installed, whole-mix otherwise), persist it, and — if a carried
-  /// flip intent was waiting on the verdict — re-gate the flip. Runs once per
-  /// track; results live on `TrackInfo.voice` in the cache registry.
-  private func ensureVoiceAnalysis(_ info: TrackInfo) {
-    guard info.voice == nil else { return }
-    // a warm prefetch may have analyzed it already — registry beats re-detecting
-    if let cached = library.cache.existing(key: info.meta.key), let voice = cached.voice {
-      var updated = info
-      updated.voice = voice
-      if track?.id == updated.id { track = updated }
-      if params.vocalFlip, flipState == .off { reconcileFlip(for: updated) }
-      return
-    }
-    let gen = generation
-    let path = info.playablePath
-    let duration = info.meta.duration
-    Task { @MainActor [weak self] in
-      let analysis = await Task.detached(priority: .utility) {
-        await VoiceAnalyzer.detect(path: path, duration: duration)
-      }.value
-      guard let voice = analysis, let self else { return }
-      var updated = info
-      updated.voice = voice
-      self.library.cache.remember(updated)
-      self.recent = self.library.cache.loadRecent()
-      guard gen == self.generation, self.track?.id == updated.id else { return }
-      self.track = updated
-      // a flip intent parked on "not analyzed yet" can now be decided
-      if self.params.vocalFlip, self.flipState == .off { self.reconcileFlip(for: updated) }
-    }
   }
 
   // MARK: Apple Music
@@ -600,27 +531,15 @@ final class AppModel: ObservableObject {
         // arm a beatmatched transition into it (engine triggers ~8 bars before the end)
         if self.automixEnabled { self.engine.armAutomix(info, params: self.params) }
       }
-      // warm the flip for the handoff, fire-and-forget — next() awaits this
-      // task's value for instant skips, so the warm must never delay it:
-      // detect vocals now (persisted → the handoff's ensureVoiceAnalysis is a
-      // cache hit), and if the flip is on and the next track reads male,
-      // pre-render its intermediate too
+      // pre-render the next track's flip for the handoff, fire-and-forget —
+      // next() awaits this task's value for instant skips, so the warm must
+      // never delay it
       Task.detached(priority: .utility) { [weak self] in
-        var warmed = info
-        if warmed.voice == nil,
-          let voice = await VoiceAnalyzer.detect(
-            path: warmed.playablePath, duration: warmed.meta.duration)
-        {
-          warmed.voice = voice
-          lib.cache.remember(warmed)
-        }
         let (flipOn, recipe) = await MainActor.run { [weak self] in
           guard let self else { return (false, VocalFlipRecipe.standard) }
           return (self.params.vocalFlip, self.flipRecipe)
         }
-        if flipOn, warmed.voice?.gender == .male {
-          _ = try? await flipper.flippedFile(for: warmed, recipe: recipe)
-        }
+        if flipOn { _ = try? await flipper.flippedFile(for: info, recipe: recipe) }
       }
       return info
     }
@@ -646,7 +565,6 @@ final class AppModel: ObservableObject {
     engine.apply(params)
     engine.play()
     reconcileFlip(for: info)
-    ensureVoiceAnalysis(info)
     busy = nil
   }
 
@@ -699,7 +617,6 @@ final class AppModel: ObservableObject {
         engine.apply(params)
         if autoPlay { engine.play() }
         reconcileFlip(for: pulled)
-        ensureVoiceAnalysis(pulled)
         busy = nil
         prefetchNext()  // warm the next queue track
       } catch is CancellationError {
@@ -730,7 +647,6 @@ final class AppModel: ObservableObject {
     engine.load(track)
     engine.apply(params)
     reconcileFlip(for: track)
-    ensureVoiceAnalysis(track)
   }
 
   func reset() {

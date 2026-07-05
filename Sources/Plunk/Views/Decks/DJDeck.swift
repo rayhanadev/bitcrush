@@ -27,6 +27,11 @@ struct DJDeck: View {
           metaLine.font(.caption).lineLimit(1).minimumScaleFactor(0.85)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        Button(action: model.export) {
+          Image(systemName: model.exporting ? "hourglass" : "arrow.down.circle")
+        }
+        .buttonStyle(.plain).foregroundStyle(.secondary).disabled(model.exporting)
+        .help("Save the remix")
       }
 
       HStack(spacing: 12) {
@@ -36,11 +41,6 @@ struct DJDeck: View {
           .foregroundStyle(.secondary).fixedSize()
         FlipButton(compact: true)
         BitcrushButton(compact: true)
-        Button(action: model.export) {
-          Image(systemName: model.exporting ? "hourglass" : "arrow.down.circle")
-        }
-        .buttonStyle(.plain).foregroundStyle(.secondary).disabled(model.exporting)
-        .help("Save the remix")
       }
     }
     .plunkCard()

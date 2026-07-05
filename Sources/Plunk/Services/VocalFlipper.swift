@@ -64,6 +64,16 @@ struct VocalFlipper: Sendable {
   /// The flipped ALAC intermediate for `track` — cached per track + recipe.
   /// Cancellable: `runCommand` terminates the child when the Task is cancelled.
   func flippedFile(for track: TrackInfo, recipe: VocalFlipRecipe) async throws -> URL {
+    var track = track
+    // measure the vocal register once — it drives the adaptive pitch cap and
+    // the Praat pitch target; persisted so later renders skip the ~30 s pass
+    if track.voice == nil,
+      let voice = await VoiceAnalyzer.detect(
+        path: track.playablePath, duration: track.meta.duration)
+    {
+      track.voice = voice
+      cache.remember(track)
+    }
     let dest = cachedURL(for: track, recipe: recipe)
     if FileManager.default.fileExists(atPath: dest.path) { return dest }
     switch recipe.engine {
