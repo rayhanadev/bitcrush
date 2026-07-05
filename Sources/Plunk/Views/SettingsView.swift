@@ -7,6 +7,12 @@ struct SettingsView: View {
   @AppStorage(PrefKey.followQueue) private var followQueue = false
   @AppStorage(PrefKey.discordPresence) private var discordPresence = true
   @AppStorage(PrefKey.automix) private var automix = true
+  @AppStorage(PrefKey.flipEngine) private var flipEngine = VocalFlipRecipe.Engine.rubberband.rawValue
+  @AppStorage(PrefKey.flipPitch) private var flipPitch = VocalFlipRecipe.standard.pitchSemitones
+  @AppStorage(PrefKey.flipFormant) private var flipFormant = VocalFlipRecipe.standard.formantRatio
+  @AppStorage(PrefKey.flipPolish) private var flipPolish = false
+  @AppStorage(PrefKey.flipGrit) private var flipGrit = VocalFlipRecipe.standard.grit
+  @AppStorage(PrefKey.flipAnyVoice) private var flipAnyVoice = false
 
   var body: some View {
     Form {
@@ -24,6 +30,36 @@ struct SettingsView: View {
           ForEach(ExportFormat.allCases) { format in
             Text(format.label).tag(format.rawValue)
           }
+        }
+      }
+
+      Section("Vocal flip (experimental)") {
+        let engines = FlipTools.availableEngines()
+        if engines.isEmpty {
+          Text("Makes male vocals read feminine (Little AlterBoy-style pitch + formant shift). \(FlipTools.installHint(.rubberband)) to enable.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          if engines.count > 1 {
+            Picker("Engine", selection: $flipEngine) {
+              ForEach(engines) { Text($0.label).tag($0.rawValue) }
+            }
+          }
+          HStack {
+            Stepper(value: $flipPitch, in: 1...9, step: 0.5) {
+              Text("Pitch  +\(flipPitch, specifier: "%.1f") st")
+            }
+          }
+          HStack {
+            Text("Formants  ×\(flipFormant, specifier: "%.2f")")
+            Slider(value: $flipFormant, in: 1.05...1.35, step: 0.01)
+          }
+          Toggle("Grit — keep some rasp (exciter)", isOn: $flipGrit)
+          Toggle("Chorus + echo polish (Porter-style sheen)", isOn: $flipPolish)
+          Toggle("Allow on any track (skip vocal detection)", isOn: $flipAnyVoice)
+          Text("The Flip button on the deck engages only for detected-male vocals unless overridden. Changes apply to the next flip render.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
       }
 

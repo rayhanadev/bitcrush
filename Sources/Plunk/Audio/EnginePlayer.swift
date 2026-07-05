@@ -118,6 +118,16 @@ final class EnginePlayer: ObservableObject {
   var _currentTitle: String { current.title }
   #endif
 
+  /// Swap the ACTIVE deck's source file in place (vocal flip ↔ plain), keeping
+  /// the playhead. No-op while mixing — the automix owns both decks during a
+  /// blend; the handoff hook re-applies the flip on the new deck afterward.
+  func swapCurrentSource(url: URL) {
+    guard !mixing, ready else { return }
+    guard current.swapSource(url: url, resume: isPlaying) else { return }
+    duration = current.duration
+    refreshNowPlaying()
+  }
+
   // MARK: live parameters
 
   func apply(_ p: RemixParams) {

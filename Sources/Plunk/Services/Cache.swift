@@ -8,6 +8,7 @@ struct Cache: Sendable {
   let tracksDir: URL
   let rendersDir: URL
   let artDir: URL
+  let flipsDir: URL
 
   init() {
     let base =
@@ -18,8 +19,24 @@ struct Cache: Sendable {
     tracksDir = root.appendingPathComponent("tracks", isDirectory: true)
     rendersDir = root.appendingPathComponent("renders", isDirectory: true)
     artDir = root.appendingPathComponent("art", isDirectory: true)
-    for dir in [tracksDir, rendersDir, artDir] {
+    flipsDir = root.appendingPathComponent("flips", isDirectory: true)
+    for dir in [tracksDir, rendersDir, artDir, flipsDir] {
       try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+    sweepOrphanFlips()
+  }
+
+  /// Delete flip intermediates whose parent track is gone — recipe churn while
+  /// experimenting would otherwise accumulate stale variants forever.
+  private func sweepOrphanFlips() {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: flipsDir.path)) ?? []
+    guard !names.isEmpty else { return }
+    let keys = Set(loadRecent().map(\.meta.key))
+    for name in names {
+      guard let range = name.range(of: "-flip-") else { continue }
+      if !keys.contains(String(name[..<range.lowerBound])) {
+        try? FileManager.default.removeItem(at: flipsDir.appendingPathComponent(name))
+      }
     }
   }
 
@@ -46,12 +63,18 @@ struct Cache: Sendable {
     var list = previous.filter { $0.meta.key != track.meta.key }
     list.insert(track, at: 0)
 
-    // keep MRU entries until we hit either the count or the byte budget
+    // keep MRU entries until we hit either the count or the byte budget; a
+    // track's flip intermediates count against its budget (they die with it)
+    let flipNames = (try? FileManager.default.contentsOfDirectory(atPath: flipsDir.path)) ?? []
+    func flipBytes(_ key: String) -> Int64 {
+      flipNames.filter { $0.hasPrefix("\(key)-flip-") }
+        .reduce(0) { $0 + fileSize(flipsDir.appendingPathComponent($1).path) }
+    }
     var kept: [TrackInfo] = []
     var bytes: Int64 = 0
     for t in list {
       guard kept.count < limit else { break }
-      let size = fileSize(t.originalPath) + fileSize(t.playablePath)
+      let size = fileSize(t.originalPath) + fileSize(t.playablePath) + flipBytes(t.meta.key)
       if !kept.isEmpty, bytes + size > maxBytes { break }
       bytes += size
       kept.append(t)
@@ -79,6 +102,11 @@ struct Cache: Sendable {
     for path in [track.originalPath, track.playablePath, track.artPath].compactMap({ $0 })
     where path.hasPrefix(root.path) {
       try? FileManager.default.removeItem(atPath: path)
+    }
+    let prefix = "\(track.meta.key)-flip-"
+    for name in (try? FileManager.default.contentsOfDirectory(atPath: flipsDir.path)) ?? []
+    where name.hasPrefix(prefix) {
+      try? FileManager.default.removeItem(at: flipsDir.appendingPathComponent(name))
     }
   }
 

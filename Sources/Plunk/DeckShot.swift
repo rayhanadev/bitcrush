@@ -24,6 +24,7 @@ enum DeckShot {
     model.params.high = 4
     model.params.filter = -0.4
     model.params.bitcrush = true  // show the lit crush state without dropping the preset
+    model.params.vocalFlip = true  // …and the lit vocal-flip state
 
     let meta = TrackMeta(
       key: "preview", title: "lovefield", artist: "underscores", duration: 168,
@@ -67,6 +68,229 @@ enum DeckShot {
       }
     }
     exit(0)
+  }
+
+  /// Print detected vocal register (median F0 + gender) for cached tracks so the
+  /// flip gate can be sanity-checked against songs whose vocalists you know
+  /// (`BITCRUSH_VOCAL=1 swift run Plunk`). Cross-checks against `aubiopitch`
+  /// when installed (`brew install aubio`).
+  static func probeVocal() {
+    runProbe { await runVocalProbe() }
+  }
+
+  /// Run an async probe from the launch callout and exit when it finishes.
+  /// MainActor tasks would never run here — we're inside the app-launch
+  /// callout, and a nested RunLoop doesn't drain the main dispatch queue — so
+  /// the probe body runs detached on the cooperative pool instead.
+  private static func runProbe(_ body: @escaping @Sendable () async -> Void) -> Never {
+    Task.detached {
+      await body()
+      exit(0)
+    }
+    while true { RunLoop.current.run(until: Date().addingTimeInterval(0.25)) }
+  }
+
+  private nonisolated static func runVocalProbe() async {
+    let cache = Cache()
+    var items: [(name: String, path: String, duration: Double)] = cache.loadRecent().map {
+      ("\($0.meta.artist) — \($0.meta.title)".prefix(46).description, $0.playablePath,
+       $0.meta.duration)
+    }
+    if items.isEmpty {
+      let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        .first
+      let tracks = base?.appendingPathComponent("plunk/tracks", isDirectory: true)
+      items = ((try? FileManager.default.contentsOfDirectory(atPath: tracks?.path ?? "")) ?? [])
+        .filter { $0.hasSuffix(".m4a") }.sorted().prefix(12)
+        .map { ($0, tracks!.appendingPathComponent($0).path, 0) }
+    }
+    if let limit = Int(ProcessInfo.processInfo.environment["BITCRUSH_VOCAL_LIMIT"] ?? "") {
+      items = Array(items.prefix(limit))
+    }
+    let aubio = Tools.locate("aubiopitch")
+    let mode = FlipTools.demucsPath() != nil ? "demucs vocal stem" : "whole mix (heuristic)"
+    print("vocal probe over \(items.count) cached track(s) — mode: \(mode)"
+      + (aubio == nil ? " (install aubio for a cross-check column)" : ""))
+    for (name, path, duration) in items {
+      let began = Date()
+      guard let v = await VoiceAnalyzer.detect(path: path, duration: duration) else {
+        print("\(name)  (undecodable)")
+        continue
+      }
+      let secs = Date().timeIntervalSince(began)
+      var line = String(
+        format: "%-48@ %@  %@  voiced %.0f%%",
+        name, v.medianF0.map { String(format: "%.1f Hz", $0) } ?? "—",
+        v.gender.rawValue, v.voicedFraction * 100)
+      if let aubio, let cross = aubioMedianF0(aubio: aubio, path: path) {
+        line += String(format: "  · aubio %.1f Hz", cross)
+      }
+      print(line + String(format: "  (%.1fs)", secs))
+    }
+  }
+
+  /// Median F0 according to `aubiopitch` (yinfft), for the probe's cross-check
+  /// column. Synchronous Process is fine here — debug probe only.
+  private nonisolated static func aubioMedianF0(aubio: String, path: String) -> Double? {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: aubio)
+    proc.arguments = ["-i", path]
+    let out = Pipe()
+    proc.standardOutput = out
+    proc.standardError = FileHandle.nullDevice
+    guard (try? proc.run()) != nil else { return nil }
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    proc.waitUntilExit()
+    // lines of "time hz"; keep plausible vocal fundamentals only
+    let f0s = String(decoding: data, as: UTF8.self)
+      .split(separator: "\n")
+      .compactMap { line -> Double? in
+        let cols = line.split(separator: " ")
+        guard cols.count >= 2, let hz = Double(cols[1]) else { return nil }
+        return (70...400).contains(hz) ? hz : nil
+      }
+    guard !f0s.isEmpty else { return nil }
+    return f0s.sorted()[f0s.count / 2]
+  }
+
+  /// Render A/B vocal-flip variants for a few detected-male cached tracks into
+  /// /tmp/flip-ab/<key>/ so recipe defaults can be picked by ear
+  /// (`BITCRUSH_FLIP=1 swift run Plunk` — probes are DEBUG-only; release builds
+  /// strip them). Per variant it writes the raw flip AND the
+  /// flip-through-nightcore result (the thing that actually ships), plus an
+  /// original-nightcore control and a single-pass "chipmunk" baseline that
+  /// shows what the two-pass formant trick is buying.
+  /// Overrides: BITCRUSH_FLIP_KEYS=key1,key2 ·
+  /// BITCRUSH_FLIP_RECIPES="8:1.25:grit:r0.8,…" · BITCRUSH_FLIP_ENGINES=rubberband
+  static func probeFlip() {
+    runProbe { await runFlipProbe() }
+  }
+
+  private nonisolated static func runFlipProbe() async {
+    let env = ProcessInfo.processInfo.environment
+    let cache = Cache()
+    let flipper = VocalFlipper(cache: cache)
+    let engines = FlipTools.availableEngines()
+    guard !engines.isEmpty else {
+      print("flip probe: no engines available — \(FlipTools.installHint(.rubberband))")
+      return
+    }
+
+    // pick tracks: explicit keys, else detected-male, else the freshest couple
+    var pool = cache.loadRecent()
+    guard !pool.isEmpty else {
+      print("flip probe: no cached tracks — pull something first")
+      return
+    }
+    if let keys = env["BITCRUSH_FLIP_KEYS"]?.split(separator: ",").map(String.init) {
+      pool = pool.filter { keys.contains($0.meta.key) }
+      // the adaptive pitch cap needs each track's register — fill missing voice
+      for i in pool.indices where pool[i].voice == nil {
+        pool[i].voice = await VoiceAnalyzer.detect(
+          path: pool[i].playablePath, duration: pool[i].meta.duration)
+      }
+    } else {
+      var males: [TrackInfo] = []
+      for var t in pool {
+        if t.voice == nil {
+          t.voice = await VoiceAnalyzer.detect(path: t.playablePath, duration: t.meta.duration)
+        }
+        if t.voice?.gender == .male { males.append(t) }
+      }
+      if males.isEmpty {
+        print("flip probe: no detected-male tracks — flipping the 2 most recent anyway")
+        pool = Array(pool.prefix(2))
+      } else {
+        pool = males
+      }
+    }
+    let tracks = pool.prefix(3)
+
+    // recipe specs: "pitch:formant[:polish][:grit][:rN.NN]", e.g. "8:1.25:grit:r0.8"
+    let specs = env["BITCRUSH_FLIP_RECIPES"] ?? "6:1.20,7:1.25,8:1.30"
+    let parsed = specs.split(separator: ",").compactMap { spec -> VocalFlipRecipe? in
+      let parts = spec.split(separator: ":").map(String.init)
+      guard parts.count >= 2, let pitch = Double(parts[0]), let formant = Double(parts[1])
+      else { return nil }
+      var r = VocalFlipRecipe(pitchSemitones: pitch, formantRatio: formant)
+      for flag in parts.dropFirst(2) {
+        if flag == "polish" { r.polish = true }
+        if flag == "grit" { r.grit = true }
+        if flag.hasPrefix("r"), let factor = Double(flag.dropFirst()) { r.pitchRangeFactor = factor }
+      }
+      return r
+    }
+    guard !parsed.isEmpty else {
+      print("flip probe: no valid recipes in BITCRUSH_FLIP_RECIPES")
+      return
+    }
+    // BITCRUSH_FLIP_ENGINES=rubberband narrows the engine set for fast recipe
+    // iteration. rubberband gets the full matrix; praatStems does a full-track
+    // separation per variant → just the middle recipe unless recipes were
+    // given explicitly
+    let wanted = env["BITCRUSH_FLIP_ENGINES"].map {
+      Set($0.split(separator: ",").map(String.init))
+    }
+    var variants = engines
+      .filter { wanted?.contains($0.rawValue) ?? true }
+      .flatMap { engine -> [VocalFlipRecipe] in
+        let forEngine =
+          engine == .rubberband || env["BITCRUSH_FLIP_RECIPES"] != nil
+          ? parsed : [parsed[min(1, parsed.count - 1)]]
+        return forEngine.map { recipe in
+          var r = recipe
+          r.engine = engine
+          return r
+        }
+      }
+    // chipmunk baseline: formants slaved 1:1 to pitch (a plain resample-style
+    // shift) — if a two-pass variant doesn't beat this, the trick isn't earning
+    variants.append(VocalFlipRecipe(pitchSemitones: 4, formantRatio: pow(2, 4.0 / 12)))
+
+    for track in tracks {
+      let outDir = URL(fileURLWithPath: "/tmp/flip-ab/\(track.meta.key)", isDirectory: true)
+      try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+      let voiceNote = track.voice?.medianF0.map { String(format: " (voice %.0f Hz)", $0) } ?? ""
+      print("\n\(track.meta.key) — \(track.meta.title)\(voiceNote)")
+      await nightcoreRender(
+        track, from: track.playablePath, to: outDir.appendingPathComponent("original-nightcore.m4a"))
+      for recipe in variants {
+        let began = Date()
+        let cached = FileManager.default.fileExists(
+          atPath: flipper.cachedURL(for: track, recipe: recipe).path)
+        do {
+          let flipped = try await flipper.flippedFile(for: track, recipe: recipe)
+          let raw = outDir.appendingPathComponent("\(recipe.cacheToken).m4a")
+          try? FileManager.default.removeItem(at: raw)
+          try? FileManager.default.copyItem(at: flipped, to: raw)
+          await nightcoreRender(
+            track, from: flipped.path,
+            to: outDir.appendingPathComponent("\(recipe.cacheToken)-nightcore.m4a"))
+          let secs = Date().timeIntervalSince(began)
+          print(String(
+            format: "  %@  %.1fs%@", recipe.cacheToken, secs, cached ? " (cached flip)" : ""))
+        } catch {
+          print("  \(recipe.cacheToken)  FAILED: \(error.localizedDescription)")
+        }
+      }
+    }
+    print("\nlisten: open /tmp/flip-ab")
+  }
+
+  /// Render `src` through the standard nightcore chain — A/B files should be
+  /// judged as the listener hears them, not as raw intermediates.
+  private nonisolated static func nightcoreRender(
+    _ track: TrackInfo, from src: String, to dest: URL
+  ) async {
+    let gain = track.loudnessI != nil ? track.makeupGainDB() : nil
+    let filter = buildAudioFilter(
+      Preset.nightcore.params!, sampleRate: Int(track.sampleRate), loudnessGainDB: gain)
+    let result = try? await runCommand(
+      "ffmpeg",
+      ["-hide_banner", "-nostats", "-y", "-i", src, "-af", filter, "-c:a", "alac", dest.path])
+    if result?.code != 0 {
+      print("  (nightcore render failed for \(dest.lastPathComponent))")
+    }
   }
 
   /// Smoke-test the dual-deck beatmatched transition end-to-end (graph + state machine):

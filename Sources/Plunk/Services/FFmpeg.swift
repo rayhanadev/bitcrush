@@ -63,29 +63,32 @@ struct FFmpeg: Sendable {
   /// ffmpeg never leaves a partial file at the user's chosen location). If the
   /// cover-art embed fails (e.g. an exotic/undecodable thumbnail), retry without it
   /// so the export still succeeds — losing the art beats failing the whole export.
+  /// `sourceOverride` renders from an alternate source file (e.g. the vocal-flip
+  /// intermediate) instead of the cached original.
   func render(
-    track: TrackInfo, params: RemixParams, format: ExportFormat, scratchDir: URL, to dest: URL
+    track: TrackInfo, params: RemixParams, format: ExportFormat, scratchDir: URL, to dest: URL,
+    sourceOverride: String? = nil
   ) async throws {
     let canEmbedArt = track.artPath != nil && format.supportsCoverArt
     do {
       try await runRender(
         track: track, params: params, format: format, scratchDir: scratchDir, to: dest,
-        embedArt: canEmbedArt)
+        embedArt: canEmbedArt, sourceOverride: sourceOverride)
     } catch {
       guard canEmbedArt else { throw error }
       try await runRender(
         track: track, params: params, format: format, scratchDir: scratchDir, to: dest,
-        embedArt: false)
+        embedArt: false, sourceOverride: sourceOverride)
     }
   }
 
   private func runRender(
     track: TrackInfo, params: RemixParams, format: ExportFormat, scratchDir: URL, to dest: URL,
-    embedArt: Bool
+    embedArt: Bool, sourceOverride: String? = nil
   ) async throws {
     let tmp = scratchDir.appendingPathComponent("render-\(UUID().uuidString).\(format.ext)")
 
-    var args = ["-hide_banner", "-nostats", "-y", "-i", track.originalPath]
+    var args = ["-hide_banner", "-nostats", "-y", "-i", sourceOverride ?? track.originalPath]
     if embedArt, let art = track.artPath { args += ["-i", art] }
     args += ["-map", "0:a:0"]
     if embedArt {

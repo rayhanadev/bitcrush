@@ -31,7 +31,10 @@ struct Library: Sendable {
     }
     let loudnessI = await loudness
 
-    // detect the beat grid for the automixer — CPU-bound, overlapped with the art fetch
+    // detect the beat grid for the automixer — CPU-bound, overlapped with the art
+    // fetch. (Vocal-register detection is NOT run here: the reliable stem-based
+    // pass takes ~30 s, which would delay playback — AppModel.ensureVoiceAnalysis
+    // backfills it right after the track becomes current.)
     let playablePath = playable.path
     async let beat = Task.detached(priority: .utility) {
       BeatAnalyzer.analyze(path: playablePath)

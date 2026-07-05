@@ -193,6 +193,72 @@ struct BitcrushButton: View {
   }
 }
 
+/// A lit "FLIP" toggle — the vocal gender flip (male → female, pitch + formants
+/// shifted independently). Glows purple when engaged, shows a pulsing hourglass
+/// while the flipped intermediate renders, and sits dimmed when the track's
+/// vocals didn't read as male (Option-click forces it — detection misses duets
+/// and high tenors sometimes).
+struct FlipButton: View {
+  @EnvironmentObject var model: AppModel
+  var compact = false
+
+  var body: some View {
+    let on = model.params.vocalFlip
+    // hourglass while the intermediate renders, or while a carried flip intent
+    // waits for vocal detection to land
+    let rendering = model.flipState == .rendering || (on && model.flipState == .off)
+    let gate = model.flipGate
+    let lit = on || gate == .ready
+    Button {
+      model.toggleFlip(force: NSEvent.modifierFlags.contains(.option))
+    } label: {
+      Group {
+        if rendering {
+          Image(systemName: "hourglass")
+            .symbolEffect(.pulse, options: .repeating)
+        } else if compact {
+          Image(systemName: "person.wave.2")
+        } else {
+          Label("Flip", systemImage: "person.wave.2")
+        }
+      }
+      .font(.system(size: 10, weight: .bold)).textCase(.uppercase)
+      .padding(.horizontal, compact ? 8 : 10).padding(.vertical, 6)
+      .foregroundStyle(on ? .white : .secondary)
+      .background(
+        RoundedRectangle(cornerRadius: 7)
+          .fill(on ? Color.purple : Color.primary.opacity(lit ? 0.08 : 0.04))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 7)
+          .strokeBorder(on ? Color.purple : Color.primary.opacity(lit ? 0.15 : 0.08), lineWidth: 1)
+      )
+      .shadow(color: on ? .purple.opacity(0.6) : .clear, radius: 5)
+      .opacity(lit ? 1 : 0.55)
+    }
+    .buttonStyle(.plain)
+    .disabled(!on && (gate == .noTrack || gate == .mixing))
+    .help(helpText(gate, on: on))
+  }
+
+  private func helpText(_ gate: AppModel.FlipGate, on: Bool) -> String {
+    if on { return "Vocal flip is on — pitch + formants up for a feminine read." }
+    switch gate {
+    case .ready:
+      return "Flip male vocals feminine (pitch + formant shift)."
+    case .needsMaleVocals(let detected):
+      let read = detected.map { "detected \($0.rawValue)" } ?? "not analyzed yet"
+      return "No male vocals here (\(read)) — Option-click to flip anyway."
+    case .noEngine:
+      return "Vocal flip needs a shifter — \(FlipTools.installHint(model.flipRecipe.engine))."
+    case .mixing:
+      return "Hold on — finishing the automix blend."
+    case .noTrack:
+      return "Load a track first."
+    }
+  }
+}
+
 // MARK: - the full knob bank
 
 /// The shared rotary control surface: a motion row (speed/pitch/filter/verb) over a

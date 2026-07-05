@@ -34,6 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["BITCRUSH_BPM"] != nil {
       DeckShot.probeBPM()  // analyzes cached tracks' BPM and exits
     }
+    if ProcessInfo.processInfo.environment["BITCRUSH_VOCAL"] != nil {
+      DeckShot.probeVocal()  // analyzes cached tracks' vocal register and exits
+    }
+    if ProcessInfo.processInfo.environment["BITCRUSH_FLIP"] != nil {
+      DeckShot.probeFlip()  // renders vocal-flip A/B variants to /tmp and exits
+    }
     if ProcessInfo.processInfo.environment["BITCRUSH_AUTOMIX"] != nil {
       DeckShot.probeAutomix()  // smoke-tests a dual-deck transition and exits
     }

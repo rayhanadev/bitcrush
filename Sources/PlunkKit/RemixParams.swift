@@ -25,10 +25,15 @@ public struct RemixParams: Equatable, Sendable {
   public var linked: Bool
   /// Lo-fi bit/sample-rate reduction (bitcrush).
   public var bitcrush: Bool
+  /// Vocal gender flip (male → female): pitch + formants shifted independently.
+  /// Not a filter-chain stage — the remix renders from a flipped source
+  /// intermediate instead (see `VocalFlipRecipe`).
+  public var vocalFlip: Bool
 
   public init(
     tempo: Double, pitch: Int, bass: Double, reverb: Double, linked: Bool,
-    mid: Double = 0, high: Double = 0, filter: Double = 0, bitcrush: Bool = false
+    mid: Double = 0, high: Double = 0, filter: Double = 0, bitcrush: Bool = false,
+    vocalFlip: Bool = false
   ) {
     self.tempo = tempo
     self.pitch = pitch
@@ -39,6 +44,7 @@ public struct RemixParams: Equatable, Sendable {
     self.reverb = reverb
     self.linked = linked
     self.bitcrush = bitcrush
+    self.vocalFlip = vocalFlip
   }
 
   public static let identity = RemixParams(tempo: 1, pitch: 0, bass: 0, reverb: 0, linked: true)
