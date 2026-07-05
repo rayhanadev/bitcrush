@@ -45,6 +45,9 @@ public struct TrackInfo: Codable, Equatable, Sendable, Identifiable {
   /// Detected beat grid (BPM + phase), measured once at pull time. Drives the
   /// beatmatched automix. nil if undetectable or an older cache entry.
   public var beat: Tempo.Beat?
+  /// Detected vocal register (median F0 + gender), measured once at pull time.
+  /// Gates the vocal flip. nil if undecodable or an older cache entry.
+  public var voice: Voice.Analysis?
 
   public var id: String { meta.key }
 
@@ -56,7 +59,8 @@ public struct TrackInfo: Codable, Equatable, Sendable, Identifiable {
 
   public init(
     meta: TrackMeta, originalPath: String, playablePath: String,
-    artPath: String?, sampleRate: Double, loudnessI: Double? = nil, beat: Tempo.Beat? = nil
+    artPath: String?, sampleRate: Double, loudnessI: Double? = nil, beat: Tempo.Beat? = nil,
+    voice: Voice.Analysis? = nil
   ) {
     self.meta = meta
     self.originalPath = originalPath
@@ -65,5 +69,6 @@ public struct TrackInfo: Codable, Equatable, Sendable, Identifiable {
     self.sampleRate = sampleRate
     self.loudnessI = loudnessI
     self.beat = beat
+    self.voice = voice
   }
 }

@@ -20,6 +20,11 @@ little auto-DJ that lives in your menu bar.
   slowed + reverb presets too.
 - **Bitcrush** — one-tap lo-fi crunch on the high "fringe" of the track (vocal body stays
   clean), gated so it sits in the mix instead of pumping.
+- **Vocal flip** — one-tap male→female vocal transform (Little AlterBoy-style: pitch and
+  formants shifted *independently*, so it reads feminine instead of chipmunk). Auto-gated:
+  the button only engages on tracks whose vocals detect as male (Option-click to force).
+  Needs `brew install rubberband`; with `demucs` + Praat installed you also get a
+  stem-based max-quality engine and much more reliable vocal detection.
 - **Beatmatched automix** — when you let the queue keep playing, it detects each track's
   BPM, phase-aligns the next one, and crossfades with a bass-swap ~8 bars before the end —
   bending the *outgoing* track to lock the beat so the incoming one always plays at speed.
@@ -44,6 +49,14 @@ your local `yt-dlp` / `ffmpeg` — nothing to deploy.
 ```sh
 brew install yt-dlp ffmpeg
 brew install oven-sh/bun/bun   # or: curl -fsSL https://bun.sh/install | bash
+```
+
+Optional, for the **vocal flip**:
+
+```sh
+brew install rubberband                        # the baseline flip engine
+brew install --cask praat                      # + demucs: stem engine & reliable detection
+uv tool install --python 3.12 --with torchcodec demucs
 ```
 
 ## Build & install
@@ -107,6 +120,15 @@ Some `DEBUG`-only env-var probes help verify things that can't be screenshotted 
 `BITCRUSH_SHOT=1` renders the deck to `/tmp/deck-dj.png`, `BITCRUSH_BPM=1` prints detected
 BPMs for cached tracks, `BITCRUSH_AUTOMIX=1` smoke-tests a dual-deck transition, and
 `BITCRUSH_DISCORD=1` exercises the Discord presence path.
+
+Two more drive the vocal flip: `BITCRUSH_VOCAL=1` sweeps cached tracks and prints each
+one's detected vocal register (median F0 · gender · voiced%, with an `aubiopitch`
+cross-check column when installed; `BITCRUSH_VOCAL_LIMIT=N` caps the sweep), and
+`BITCRUSH_FLIP=1` renders A/B flip variants for a few detected-male tracks into
+`/tmp/flip-ab/<key>/` — raw flip and flip-through-nightcore per recipe, plus an
+`original-nightcore` control and a single-pass `chipmunk` baseline — so recipe defaults
+get picked by ear (`BITCRUSH_FLIP_KEYS=…` and `BITCRUSH_FLIP_RECIPES="4:1.15:polish,…"`
+override the defaults).
 
 ## Notes
 

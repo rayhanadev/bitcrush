@@ -34,6 +34,7 @@ struct DJDeck: View {
         Waveform(peaks: engine.peaks, progress: engine.progress, height: 20, onSeek: engine.seek(to:))
         Text(time).font(.system(size: 10, weight: .medium, design: .monospaced))
           .foregroundStyle(.secondary).fixedSize()
+        FlipButton(compact: true)
         BitcrushButton(compact: true)
         Button(action: model.export) {
           Image(systemName: model.exporting ? "hourglass" : "arrow.down.circle")

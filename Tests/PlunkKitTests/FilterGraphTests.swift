@@ -110,12 +110,28 @@ struct FilterGraphTests {
     #expect(a.count == 20)
   }
 
+  @Test("cache key varies with the vocal flip")
+  func cacheKeyVocalFlip() {
+    var p = RemixParams.nightcore
+    p.vocalFlip = true
+    let keyPlain = renderCacheKey(trackKey: "x", params: Preset.nightcore.params!, format: .mp3)
+    let keyFlip = renderCacheKey(trackKey: "x", params: p, format: .mp3)
+    #expect(keyPlain != keyFlip)
+  }
+
   @Test("vibe labels match the preset combos")
   func vibes() {
     #expect(vibeLabel(Preset.nightcore.params!) == "nightcore")
     #expect(vibeLabel(Preset.daycore.params!) == "daycore")
     #expect(vibeLabel(Preset.slowed.params!) == "slowed + reverb")
     #expect(vibeLabel(.identity) == "original")
+  }
+
+  @Test("vocal flip doesn't change the vibe label — the suffix is a call-site concern")
+  func vibeUnchangedByFlip() {
+    var p = Preset.nightcore.params!
+    p.vocalFlip = true
+    #expect(vibeLabel(p) == "nightcore")
   }
 }
 

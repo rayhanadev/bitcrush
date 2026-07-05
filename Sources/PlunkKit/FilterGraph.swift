@@ -146,6 +146,7 @@ public func renderCacheKey(
     String(format: "%.3f", p.reverb),
     p.linked ? "1" : "0",
     p.bitcrush ? "1" : "0",
+    p.vocalFlip ? "1" : "0",
     format.rawValue,
   ]
   let digest = SHA256.hash(data: Data(parts.joined(separator: "|").utf8))

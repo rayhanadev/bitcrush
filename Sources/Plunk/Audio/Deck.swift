@@ -158,6 +158,27 @@ final class Deck {
     return true
   }
 
+  /// Swap this deck's source file in place (vocal flip ↔ plain), preserving the
+  /// playhead. Valid because the flip preserves tempo/duration/sample rate, so
+  /// frames map 1:1 (clamped — codecs can pad a few hundred frames). Returns
+  /// false if the file is undecodable or its format diverges from what the
+  /// chain was wired for.
+  @discardableResult
+  func swapSource(url: URL, resume: Bool) -> Bool {
+    guard file != nil, let f = try? AVAudioFile(forReading: url),
+      f.processingFormat.sampleRate == sampleRate,
+      f.processingFormat.channelCount == file?.processingFormat.channelCount
+    else { return false }
+    let frame = min(currentFrame(), f.length)
+    stopPlayer()
+    file = f
+    totalFrames = f.length
+    duration = sampleRate > 0 ? Double(totalFrames) / sampleRate : duration
+    seekFrame = frame
+    if resume { startPlayback() }
+    return true
+  }
+
   func apply(_ p: RemixParams) {
     if p.linked, p.pitch == 0 {
       varispeed.rate = Float(min(max(p.tempo, 1.0 / 32), 32))

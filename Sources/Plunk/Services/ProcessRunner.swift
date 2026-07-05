@@ -71,9 +71,14 @@ private func readToEnd(_ handle: FileHandle) async -> Data {
 /// process if the surrounding Task is cancelled.
 func runCommand(_ tool: String, _ args: [String]) async throws -> CommandResult {
   guard let exe = Tools.locate(tool) else { throw ProcessError.notFound(tool) }
+  return try await runCommandAt(exe, args)
+}
 
+/// Same, for an executable at a fixed path that isn't PATH-resolved (e.g. the
+/// Praat cask binary inside its .app bundle).
+func runCommandAt(_ exePath: String, _ args: [String]) async throws -> CommandResult {
   let proc = Process()
-  proc.executableURL = URL(fileURLWithPath: exe)
+  proc.executableURL = URL(fileURLWithPath: exePath)
   proc.arguments = args
   var env = ProcessInfo.processInfo.environment
   env["PATH"] = Tools.childPath()
@@ -85,12 +90,20 @@ func runCommand(_ tool: String, _ args: [String]) async throws -> CommandResult 
   proc.standardError = errPipe
 
   return try await withTaskCancellationHandler {
-    try proc.run()
     async let out = readToEnd(outPipe.fileHandleForReading)
     async let err = readToEnd(errPipe.fileHandleForReading)
+    // terminationHandler is set BEFORE launch so an exit can never be missed —
+    // waitUntilExit's run-loop polling proved lossy (children exited, the wait
+    // never woke) when several subprocesses run back-to-back off the main thread
+    let code: Int32 = try await withCheckedThrowingContinuation { cont in
+      proc.terminationHandler = { cont.resume(returning: $0.terminationStatus) }
+      do { try proc.run() } catch {
+        proc.terminationHandler = nil
+        cont.resume(throwing: error)
+      }
+    }
     let (stdout, stderr) = await (out, err)
-    proc.waitUntilExit()
-    return CommandResult(stdout: stdout, stderr: stderr, code: proc.terminationStatus)
+    return CommandResult(stdout: stdout, stderr: stderr, code: code)
   } onCancel: {
     proc.terminate()
   }
