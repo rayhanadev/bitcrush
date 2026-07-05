@@ -48,6 +48,10 @@ final class AppModel: ObservableObject {
   enum FlipState: Equatable { case off, rendering, on(URL) }
   @Published private(set) var flipState: FlipState = .off
   private var flipTask: Task<Void, Never>?
+  /// Background pre-render of the CURRENT track's flip, started when the track
+  /// becomes current — pressing Flip must flip this song, not finish two
+  /// minutes into the next one.
+  private var flipWarm: (key: String, recipe: VocalFlipRecipe, task: Task<URL, Error>)?
 
   let engine = EnginePlayer()
   private let library: Library
@@ -230,16 +234,39 @@ final class AppModel: ObservableObject {
     startFlipRender(for: track)
   }
 
-  /// Render (or fetch the cached) flipped intermediate off-main, then swap the
-  /// live deck onto it. Generation-guarded like every other async pipeline here.
+  /// Pre-render `track`'s flip in the background. Cancels the previous track's
+  /// warm render; the result is the same cached intermediate `startFlipRender`
+  /// consumes, so the Flip button swaps in seconds instead of minutes.
+  private func warmFlip(for track: TrackInfo) {
+    flipWarm?.task.cancel()
+    flipWarm = nil
+    let recipe = flipRecipe
+    guard FlipTools.availableEngines().contains(recipe.engine) else { return }
+    let flipper = flipper
+    let task = Task.detached(priority: .utility) {
+      try await flipper.flippedFile(for: track, recipe: recipe)
+    }
+    flipWarm = (track.meta.key, recipe, task)
+  }
+
+  /// Render (or fetch the cached / in-flight warm) flipped intermediate
+  /// off-main, then swap the live deck onto it. Generation-guarded like every
+  /// other async pipeline here.
   private func startFlipRender(for track: TrackInfo) {
     flipTask?.cancel()
     flipState = .rendering
     let gen = generation
     let recipe = flipRecipe
+    let warm =
+      flipWarm?.key == track.meta.key && flipWarm?.recipe == recipe ? flipWarm?.task : nil
     flipTask = Task { @MainActor [weak self, flipper] in
       do {
-        let url = try await flipper.flippedFile(for: track, recipe: recipe)
+        let url: URL
+        if let warm {
+          url = try await warm.value
+        } else {
+          url = try await flipper.flippedFile(for: track, recipe: recipe)
+        }
         guard let self, !Task.isCancelled, gen == self.generation, self.params.vocalFlip
         else { return }
         self.engine.swapCurrentSource(url: url)
@@ -340,6 +367,7 @@ final class AppModel: ObservableObject {
     meta = track.meta
     self.track = track
     recent = library.cache.loadRecent()
+    warmFlip(for: track)
     reconcileFlip(for: track)
     clearPrefetch()  // also disarms the engine
     prefetchNext()  // advance Music to the next track + prefetch + arm
@@ -564,6 +592,7 @@ final class AppModel: ObservableObject {
     engine.load(info)
     engine.apply(params)
     engine.play()
+    warmFlip(for: info)
     reconcileFlip(for: info)
     busy = nil
   }
@@ -616,6 +645,7 @@ final class AppModel: ObservableObject {
         engine.load(pulled)
         engine.apply(params)
         if autoPlay { engine.play() }
+        warmFlip(for: pulled)
         reconcileFlip(for: pulled)
         busy = nil
         prefetchNext()  // warm the next queue track
@@ -646,6 +676,7 @@ final class AppModel: ObservableObject {
     self.track = track
     engine.load(track)
     engine.apply(params)
+    warmFlip(for: track)
     reconcileFlip(for: track)
   }
 
@@ -654,6 +685,8 @@ final class AppModel: ObservableObject {
     workTask?.cancel()
     flipTask?.cancel()
     flipTask = nil
+    flipWarm?.task.cancel()
+    flipWarm = nil
     flipState = .off
     clearPrefetch()
     engine.stop()

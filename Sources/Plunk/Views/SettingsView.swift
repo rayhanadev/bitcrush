@@ -55,7 +55,7 @@ struct SettingsView: View {
           }
           Toggle("Grit (rasp exciter)", isOn: $flipGrit)
           Toggle("Chorus + echo polish (Porter-style sheen)", isOn: $flipPolish)
-          Text("Flipping renders each track once (a minute or two); after that it toggles instantly. Changes here apply to the next render.")
+          Text("Each track's flip renders in the background when it loads, so the button usually swaps right away. Changes here apply to the next render.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
