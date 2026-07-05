@@ -12,7 +12,6 @@ struct SettingsView: View {
   @AppStorage(PrefKey.flipFormant) private var flipFormant = VocalFlipRecipe.standard.formantRatio
   @AppStorage(PrefKey.flipPolish) private var flipPolish = false
   @AppStorage(PrefKey.flipGrit) private var flipGrit = VocalFlipRecipe.standard.grit
-  @AppStorage(PrefKey.flipAnyVoice) private var flipAnyVoice = false
 
   var body: some View {
     Form {
@@ -36,7 +35,7 @@ struct SettingsView: View {
       Section("Vocal flip (experimental)") {
         let engines = FlipTools.availableEngines()
         if engines.isEmpty {
-          Text("Makes male vocals read feminine (Little AlterBoy-style pitch + formant shift). \(FlipTools.installHint(.rubberband)) to enable.")
+          Text("Makes vocals read feminine (pitch and formants shifted independently). Install it with `brew install rubberband`.")
             .font(.caption)
             .foregroundStyle(.secondary)
         } else {
@@ -54,10 +53,9 @@ struct SettingsView: View {
             Text("Formants  ×\(flipFormant, specifier: "%.2f")")
             Slider(value: $flipFormant, in: 1.05...1.35, step: 0.01)
           }
-          Toggle("Grit — keep some rasp (exciter)", isOn: $flipGrit)
+          Toggle("Grit (rasp exciter)", isOn: $flipGrit)
           Toggle("Chorus + echo polish (Porter-style sheen)", isOn: $flipPolish)
-          Toggle("Allow on any track (skip vocal detection)", isOn: $flipAnyVoice)
-          Text("The Flip button on the deck engages only for detected-male vocals unless overridden. Changes apply to the next flip render.")
+          Text("Flipping renders each track once (a minute or two); after that it toggles instantly. Changes here apply to the next render.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
